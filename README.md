@@ -22,15 +22,21 @@
     | 2 | 2 | 0 0 * * SUN| uci-private-exhaust |
 
 
-* We will have a DAG `exhaust_requester` that will run in the morning which will first fetch the config from both the `exhaust_config.py` file and `exhaust_config` table then join the result using `state_id`, then for each result object we will push request which need to be sent into table `exhaust_requests` table structure would be:
+* We will have a DAG `exhaust_requester` that will run based on the `cron_config` above
+- which will first fetch the config from both the `exhaust_config.py` file and `exhaust_config` table 
+- then join the result using `state_id`, 
+- then for each result object we will push request which need to be sent into table `exhaust_requests`
+
+table structure would be:
 
     | bot_id | tag | start_date | end_date | status | state_id | dataset | request_id |
     | ------ | --- | ---------- | -------- | ------ | -------- | ------- | ---------- |
     | 1 | 1 | 28/06/2022 | 29/06/2022 | `null` | 1 | `uci-response-exhaust` | null |
-    | 2 | 2 | 27/06/2022 | 28/06/2022 | SUBMITTED | 1 | `uci-response-exhaust` | x12esa1Asad |
+    | 2 | 2 | 27/06/2022 | 28/06/2022 | SUBMITTED | 1 | `uci-private-exhaust` | x12esa1Asad |
 
 
     `tag` will be auto generated UUID, `start_date` & `end_date` will get inferred from frequency.
+    `status` can be `NULL`, `SUBMITTED`, `RESPONSE` and `ERROR`
 
 
 * Next we will send the request to `{{host}}/dataset/v1/request/submit` by pick requests from `exhaust_requests` table whose `end_date` is lesser than or equals to current date. At last, we will update the `request_id` and `status` we get while making the above request into the `exhaust_requests` table.
