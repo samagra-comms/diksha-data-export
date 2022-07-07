@@ -1,6 +1,6 @@
 # diksha-data-export
 
-# Action Plan for Exhaust Report
+### Implemenatation Details
 
 * A config file `exhaust_config.py` will contain an array of 'config' objects. The config object will have this structure:
 
