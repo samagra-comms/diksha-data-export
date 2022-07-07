@@ -23,10 +23,10 @@
 
 
 * We will have a DAG `exhaust_requester` that will run based on the `cron_config` above
-- which will first fetch the config from both the `exhaust_config.py` file and `exhaust_config` table 
-- then join the result using `state_id`, 
-- then for each result object we will push request which need to be sent into table `exhaust_requests`
-- after successful response the data is saved in a CSV on minio
+    - which will first fetch the config from both the `exhaust_config.py` file and `exhaust_config` table 
+    - then join the result using `state_id`, 
+    - then for each result object we will push request which need to be sent into table `exhaust_requests`
+    - after successful response the data is saved in a CSV on minio
 
 `tag` will be auto generated UUID, `start_date` & `end_date` will get inferred from frequency.
 `status` can be `NULL`, `SUBMITTED`, `RESPONSE`, `MANUAL ABORT` and `ERROR`
