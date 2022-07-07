@@ -26,18 +26,15 @@
 - which will first fetch the config from both the `exhaust_config.py` file and `exhaust_config` table 
 - then join the result using `state_id`, 
 - then for each result object we will push request which need to be sent into table `exhaust_requests`
+- after successful response the data is saved in a CSV on minio
 
-table structure would be:
+`tag` will be auto generated UUID, `start_date` & `end_date` will get inferred from frequency.
+`status` can be `NULL`, `SUBMITTED`, `RESPONSE`, `MANUAL ABORT` and `ERROR`
 
-    | bot_id | tag | start_date | end_date | status | state_id | dataset | request_id |
-    | ------ | --- | ---------- | -------- | ------ | -------- | ------- | ---------- |
-    | 1 | 1 | 28/06/2022 | 29/06/2022 | `null` | 1 | `uci-response-exhaust` | null |
-    | 2 | 2 | 27/06/2022 | 28/06/2022 | SUBMITTED | 1 | `uci-private-exhaust` | x12esa1Asad |
-
-
-    `tag` will be auto generated UUID, `start_date` & `end_date` will get inferred from frequency.
-    `status` can be `NULL`, `SUBMITTED`, `RESPONSE` and `ERROR`
-
+| bot_id | tag | start_date | end_date | status | state_id | dataset | request_id | csv |
+| ------ | --- | ---------- | -------- | ------ | -------- | ------- | ---------- | --- |
+| 1 | 1 | 28/06/2022 | 29/06/2022 | `null` | 1 | `uci-response-exhaust` | null | null |
+| 2 | 2 | 27/06/2022 | 28/06/2022 | SUBMITTED | 1 | `uci-private-exhaust` | x12esa1Asad | http://cdn.samagra.io/x.csv |
 
 * Next we will send the request to `{{host}}/dataset/v1/request/submit` by pick requests from `exhaust_requests` table whose `end_date` is lesser than or equals to current date. At last, we will update the `request_id` and `status` we get while making the above request into the `exhaust_requests` table.
 
