@@ -26,7 +26,7 @@ __request_table__ = 'job_request'
 __response_table__ = 'response'
 __config_table__ = 'cron_config'
 
-__read_api_url__ = '{{host}}/dataset/v1/request/read'
+__read_api_url__ = Variable.get("data-export-exhaust-read-api")
 
 
 def get_connection(uri=__db_uri__):

@@ -26,11 +26,11 @@ __request_table__ = 'job_request'
 __response_table__ = 'response'
 __config_table__ = 'cron_config'
 
-__submit_api_url__ = '{{host}}/dataset/v1/request/submit'
-__submit_api_id__ = 'ekstep.analytics.job.request.submit'
-__submit_api_ver__ = '1.0'
-__submit_api_requestedBy__ = 'user_id'
-__submit_api_requestedChannel__ = '01309282781705830427'
+__submit_api_url__ = Variable.get("data-export-exhaust-submit-api")
+__submit_api_id__ = Variable.get("data-export-exhaust-submit-api-id")
+__submit_api_ver__ = Variable.get("data-export-exhaust-submit-api-ver")
+__submit_api_requestedBy__ = Variable.get("data-export-exhaust-submit-api-user-id")
+__submit_api_requestedChannel__ = Variable.get("data-export-exhaust-submit-api-channel-id")
 __submit_api_output_format__ = 'csv'
 
 

@@ -44,10 +44,10 @@ def dump_data_in_uci_response_exhaust_table(curr, data):
     dump processed data in 'uci_response_exhaust' table
     '''
     query = 'insert into "{}" values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)'.format(
-        __uci_response_exhaust_table__, )
+        __uci_response_exhaust_table__)
     cur.executemany(query, data)
-    # logging.info(
-    # f"Total row affected in {__table_name__} table on {dt_string}: {str(cur.rowcount)}")
+    logging.info(
+        f"Total row affected in {__uci_response_exhaust_table__} table on {dt_string}: {str(cur.rowcount)}")
 
 
 def update_is_csv_processed(cur, tag):
@@ -67,6 +67,10 @@ def download_csv(link):
 
 
 def fix_csv_data(data):
+    '''
+    Apply some regex to process data in required form
+    this function expect data without header row
+    '''
     for i in range(0, len(data)):
         if data[i][5] == 'mcq':
             lst = re.findall(r'text\\\":\\\"(.+?)\\', data[i][11])
@@ -74,7 +78,11 @@ def fix_csv_data(data):
             data[i][11] = ';'.join(lst)
         else:
             data[i][11] = ''
+        data[i][14] = True if data[i][14] == 'true' else False
+        data[i][12] = re.search(
+            r'\[{(.*?):\\\"(.*?)\\\"(.*?)\]', data[i][12]).group(2).strip()
     return data
+
 
 def get_csv_data(path):
     arr = []
