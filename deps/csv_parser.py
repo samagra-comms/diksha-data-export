@@ -56,41 +56,39 @@ def update_is_csv_processed(cur, tag):
     cur.execute(query)
 
 
-def download_csv(link):
+def get_csv_file_data(link: str) -> list[list]:
     r = requests.get(link, stream=True)
     path = f'{__path_store_csv__}/{uuid.uuid4()}.csv'
     with open(f'{__path_store_csv__}/{filename}', "wb") as csv:
         for chunk in r.iter_content(chunk_size=1024):
             if chunk:
                 csv.write(chunk)
-    return path
+    with open(path, mode='r') as f:
+        content = f.read()
+        content = re.sub(r'\n\n', r'', content)
+        content = re.sub(r'\\"', r'"', content)
+        content = re.sub(r'{(.*?)}}((,))', r'\g<1>}&!&', content)
+        with open(f'{__path_store_csv__}/temp.csv', mode='w') as wf:
+            wf.write(content)
+        with open(f'{__path_store_csv__}/temp.csv', mode='r') as rf:
+            csv_file = csv.reader(rf, quoting=csv.QUOTE_NONE, quotechar = '"')
+            data = [list(map(lambda x: x.strip('"'), l)) for l in csv_file]
+    return data
 
 
-def fix_csv_data(data):
+
+def parse_csv_data(arr: list[list]) -> list[list]:
     '''
     Apply some regex to process data in required form
     this function expect data without header row
     '''
-    for i in range(0, len(data)):
-        if data[i][5] == 'mcq':
-            lst = re.findall(r'text\\\":\\\"(.+?)\\', data[i][11])
-            lst = [x.strip() for x in lst]
-            data[i][11] = ';'.join(lst)
-        else:
-            data[i][11] = ''
-        data[i][14] = True if data[i][14] == 'true' else False
-        lst = re.findall(r'{\\(\")?(.*?)\\\":\\\"((.+?))\\\"}', data[i][12])
-        lst = [x[3].strip() for x in lst]
-        arr[i][12] = ';'.join(lst)
-    return data
-
-
-def get_csv_data(path):
-    arr = []
-    with open(path, mode='r') as f:
-        csv_file = csv.reader(f)
-        for lines in csv_file:
-            arr.append(lines)
+    for i in range(len(arr)):
+        if arr[i][5] == 'mcq':
+            lst = re.findall(r'\"text\":\"(.*?)\"', arr[i][11])
+            arr[i][11] = ':'.join(lst)
+        arr[i][14] = True if arr[i][14] == 'true' else False
+        lst = re.findall(r'\"(.*?)\":(\"|\{\"text\":\")(.*?)\"', arr[i][12])
+        arr[i][12] = ':'.join([x[2] for x in lst])
     return arr
 
 
@@ -134,10 +132,9 @@ def process_csv(**context):
     unprocessed_csv_records = cur.fetchall()
 
     for csv_record in unprocessed_csv_records:
-        config = [d for d in exhaust_config if d['state_id'] == state_id]
-        if len(config) == 0:
-            logger.error(
-                'Invalid state_id passed to create_response_table_if_not_exist() method')
+        config = filter(lambda x: x['state_id'] == csv_record['state_id'], exhaust_config)
+        assert len(config) > 0, f"No config available for state_id = {csv_record['state_id']} in exhaust_config"
+        
         try:
             cur_state, conn_state = get_connection(
                 config[0]['db_credentials']['uri'])
@@ -145,13 +142,11 @@ def process_csv(**context):
             cur_state, conn_state = get_connection(
                 config[0]['db_credentials']['uri'])
 
-        path = download_csv(csv_record)
-        data = get_csv_data(path)
+        data = get_csv_file_data(csv_record['csv'])
+        parsed_data = parse_csv_data(data[1:])
+        
         create_uci_response_exhaust_table_if_not_exist(cur_state)
-
-        fixed_data = fix_csv_data(data)
-
-        dump_data_in_uci_response_exhaust_table(cur_state, fixed_data)
+        dump_data_in_uci_response_exhaust_table(cur_state, parsed_data)
 
         update_is_csv_processed(cur, csv_record['tag'])
 
