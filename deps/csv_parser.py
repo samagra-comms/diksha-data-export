@@ -79,8 +79,9 @@ def fix_csv_data(data):
         else:
             data[i][11] = ''
         data[i][14] = True if data[i][14] == 'true' else False
-        data[i][12] = re.search(
-            r'\[{(.*?):\\\"(.*?)\\\"(.*?)\]', data[i][12]).group(2).strip()
+        lst = re.findall(r'{\\(\")?(.*?)\\\":\\\"((.+?))\\\"}', data[i][12])
+        lst = [x[3].strip() for x in lst]
+        arr[i][12] = ';'.join(lst)
     return data
 
 
@@ -130,9 +131,9 @@ def process_csv(**context):
     query = 'SELECT * FROM "{}" where "csv" is not null and "is_csv_processed" = false'.format(
         __request_table__)
     cur.execute(query)
-    unprocessed_csv = cur.fetchall()
+    unprocessed_csv_records = cur.fetchall()
 
-    for csv in unprocessed_csv:
+    for csv_record in unprocessed_csv_records:
         config = [d for d in exhaust_config if d['state_id'] == state_id]
         if len(config) == 0:
             logger.error(
@@ -144,13 +145,15 @@ def process_csv(**context):
             cur_state, conn_state = get_connection(
                 config[0]['db_credentials']['uri'])
 
-        path = download_csv(csv)
+        path = download_csv(csv_record)
         data = get_csv_data(path)
         create_uci_response_exhaust_table_if_not_exist(cur_state)
 
         fixed_data = fix_csv_data(data)
 
         dump_data_in_uci_response_exhaust_table(cur_state, fixed_data)
+
+        update_is_csv_processed(cur, csv_record['tag'])
 
         conn_state.commit()
         conn_state.close()
