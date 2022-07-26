@@ -1,18 +1,12 @@
-import requests
-import json
-import psycopg2
 import logging
-import time
-import uuid
 from datetime import datetime
+
+import psycopg2
+import requests
 from dateutil.relativedelta import relativedelta
 from psycopg2.extras import RealDictCursor
+
 from airflow.models import Variable
-from deps.config.exhaust_config import config as exhaust_config
-from croniter import croniter
-
-# from .template_dict_store import Dict
-
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -23,10 +17,11 @@ now = datetime.now()
 #################################################
 __db_uri__ = Variable.get("main-db")
 __request_table__ = 'job_request'
-__response_table__ = 'response'
 __config_table__ = 'cron_config'
 
-__read_api_url__ = Variable.get("data-export-exhaust-read-api")
+__csv_service_url__ = Variable.get("data-exhaust-service-url")
+__csv_service_token__ = Variable.get("data-exhaust-service-token")
+__data_exhaust_api_org_id__ = Variable.get("data-exhaust-api-org-id")
 
 
 def get_connection(uri=__db_uri__):
@@ -38,18 +33,23 @@ def get_connection(uri=__db_uri__):
     return cur, conn
 
 
-def call_data_exhaust_read_api(tag, request_id):
+def call_data_exhaust_read_api(request_id, tag):
     '''
     call data_exhaust_read_api for fetching and saving csv link
     '''
     query_param = {
-        'request_id': request_id
+        'requestId': request_id
     }
-    r = requests.get(f'{__read_api_url__}/{tag}', params=query_param)
+    r = requests.get(f'{__csv_service_url__}/read/{tag}', params=query_param, headers={
+        'Authorization': f'Bearer {__csv_service_token__}',
+        'X-Channel-ID': __data_exhaust_api_org_id__,
+        'Content-Type': 'application/json'
+    })
+
     return r.status_code, r.json()
 
 
-def update_status_csv(cur, status, request_id, tag):
+def update_status_csv(cur, status, csv, tag):
     '''
     update column 'status' and 'csv' of 'job_request' table
     '''
@@ -70,26 +70,38 @@ def handle_read_requests(**context):
         cur, conn = get_connection()
     except psycopg2.InterfaceError:
         cur, conn = get_connection()
-    query = """SELECT * FROM "{}" where "request_id" is not null and "status" = '{}' and "end_date" <= '{}'""".format(
-        __request_table__, 'SUBMITTED', datetime.now())
+    query = """SELECT * FROM "{}" where "request_id" is not null and "status" = '{}'""".format(
+        __request_table__, 'SUBMITTED')
     cur.execute(query)
     matured_requests = cur.fetchall()
 
     for req in matured_requests:
+        req = dict(req)
         status_code, response = call_data_exhaust_read_api(
-            req['tag'], req['request_id'])
+            req['request_id'], req['tag'])
+
         if status_code == 200:
-            if response['status'] == 'SUCCESS':
+            if response['result']['status'] == 'SUCCESS':
                 update_status_csv(
-                    cur, response['status'], response['downloadUrl'][0])
+                    cur, response['result']['status'], response['result']['downloadUrl'][0], req['tag'])
                 logging.info(
-                    f"Response of tag {req['tag']} on {dt_string} for bot {req['bot']} and state {req['state_id']} saved success")
+                    f"Response of tag {req['tag']} on {dt_string} for bot {req['bot_id']} and state {req['state_id']} saved success")
             else:
                 logging.info(
-                    f"Response of tag {req['tag']} on {dt_string} for bot {req['bot']} and state {req['state_id']} not ready yet")
+                    f"Response of tag {req['tag']} on {dt_string} for bot {req['bot_id']} and state {req['state_id']} not ready yet")
         else:
             logging.error(
-                f"Request of tag {req['tag']} on {dt_string} for bot {req['bot']} and state {req['state_id']} saved failed")
-
+                f"Request of tag {req['tag']} on {dt_string} for bot {req['bot_id']} and state {req['state_id']} saved failed")
     conn.commit()
     conn.close()
+
+
+# cleanup
+if __name__ == '__main__':
+    class D:
+        def __init__(self, date=datetime.now().date()):
+            self.date = date
+
+        def to_date_string(self):
+            return str(self.date)
+    handle_read_requests(execution_date=D())

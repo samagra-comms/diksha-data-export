@@ -2,16 +2,13 @@ from airflow import DAG
 from datetime import datetime, timedelta
 from airflow.operators.dummy_operator import DummyOperator
 from airflow.operators.python_operator import PythonOperator
-from airflow.operators.bash_operator import BashOperator
-from deps.config.exhaust_config import config
 from deps.requester import create_job_requests, process_job_requests
 
 default_args = {
     "owner": "radhay",
     "depends_on_past": True,
-    "start_date": datetime(year=2022, month=3, day=11),
+    # "start_date": datetime(year=2022, month=3, day=11),
     "email": ["radhay@samagragovernance.in"],
-
     "email_on_failure": True,
     "email_on_retry": True,
     "retries": 2,
