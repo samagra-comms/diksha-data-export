@@ -121,7 +121,7 @@ def create_job_requests(**context):
         difference = (end_date - start_date).days
         query = f"""
             SELECT * FROM "{__request_table__}"
-            where "status" != 'SUCCESS'
+            where "request_id" is null
             and "state_id" = '{config['state_id']}' 
             and "bot_id" = '{config['bot_id']}' 
             and ABS("end_date" - "start_date") = '{difference}'
@@ -216,15 +216,3 @@ def process_job_requests(**context):
 
     conn.commit()
     conn.close()
-
-
-# cleanup
-if __name__ == '__main__':
-    class D:
-        def __init__(self, date=datetime.now().date()):
-            self.date = date
-
-        def to_date_string(self):
-            return str(self.date)
-    create_job_requests(execution_date=D())
-    process_job_requests(execution_date=D())

@@ -43,7 +43,7 @@ def insert_data_in_uci_response_exhaust_table(cur, conn, data):
     '''
     query = '''
         insert into "{}" 
-        ("message_id", "conversation_id", "conversation_name", "device_id", "question_id", "question_type", "question_title", "question_description", "question_score", "question_max_score", "question_options", "question_response", "x_path", "eof", "timestamp")
+        ("message_id", "conversation_id", "conversation_name", "device_id", "question_id", "question_type", "question_title", "question_description", "question_duration", "question_score", "question_max_score", "question_options", "question_response", "x_path", "eof", "timestamp")
         values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     '''.format(__uci_response_exhaust_table__)
     chunk_size = 100000
@@ -106,6 +106,7 @@ def create_or_update_uci_response_exhaust_table(cur, conn):
         'question_type': 'text',
         'question_title': 'text',
         'question_description': 'text',
+        'question_duration': 'text',
         'question_score': 'text',
         'question_max_score': 'text',
         'question_options': 'text',
@@ -127,7 +128,6 @@ def create_or_update_uci_response_exhaust_table(cur, conn):
     '''
     cur.execute(query)
     result = dict(cur.fetchone())
-
     if result['exists']:
         query = f'''
         SELECT
@@ -204,14 +204,3 @@ def process_csv(**context):
         conn_state.close()
     conn.commit()
     conn.close()
-
-
-# cleanup
-if __name__ == '__main__':
-    class D:
-        def __init__(self, date=datetime.now().date()):
-            self.date = date
-
-        def to_date_string(self):
-            return str(self.date)
-    process_csv(execution_date=D())

@@ -94,14 +94,3 @@ def handle_read_requests(**context):
                 f"Request of tag {req['tag']} on {dt_string} for bot {req['bot_id']} and state {req['state_id']} saved failed")
     conn.commit()
     conn.close()
-
-
-# cleanup
-if __name__ == '__main__':
-    class D:
-        def __init__(self, date=datetime.now().date()):
-            self.date = date
-
-        def to_date_string(self):
-            return str(self.date)
-    handle_read_requests(execution_date=D())
