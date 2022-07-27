@@ -70,7 +70,7 @@ def get_csv_file_data(link):
                 csv_file.write(chunk)
     with open(path, mode='r') as f:
         content = f.read()
-        content = re.sub(r'\n\n', r'', content)
+        content = re.sub(r'\n\n+', r'', content)
         content = re.sub(r'\\"', r'"', content)
         content = re.sub(r'{(.*?)}}((,))', r'\g<1>}&!&', content)
         with open(f'{__path_store_csv__}/temp.csv', mode='w') as wf:
