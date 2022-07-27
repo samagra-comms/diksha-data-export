@@ -83,7 +83,7 @@ def handle_read_requests(**context):
         if status_code == 200:
             if response['result']['status'] == 'SUCCESS':
                 update_status_csv(
-                    cur, response['result']['status'], response['result']['downloadUrl'][0], req['tag'])
+                    cur, response['result']['status'], response['result']['downloadUrls'][0], req['tag'])
                 logging.info(
                     f"Response of tag {req['tag']} on {dt_string} for bot {req['bot_id']} and state {req['state_id']} saved success")
             else:

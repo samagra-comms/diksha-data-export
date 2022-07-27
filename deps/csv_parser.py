@@ -37,15 +37,15 @@ def get_connection(uri=__db_uri__):
     return cur, conn
 
 
-def insert_data_in_uci_response_exhaust_table(cur, conn, data):
+def insert_data_in_uci_response_exhaust_table(cur, conn, data, config_id, bot_id):
     '''
     dump processed data in 'uci_response_exhaust' table
     '''
     query = '''
         insert into "{}" 
-        ("message_id", "conversation_id", "conversation_name", "device_id", "question_id", "question_type", "question_title", "question_description", "question_duration", "question_score", "question_max_score", "question_options", "question_response", "x_path", "eof", "timestamp")
-        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-    '''.format(__uci_response_exhaust_table__)
+        ("config_id", "bot_id", "message_id", "conversation_id", "conversation_name", "device_id", "question_id", "question_type", "question_title", "question_description", "question_duration", "question_score", "question_max_score", "question_options", "question_response", "x_path", "eof", "timestamp")
+        values ('{}','{}',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    '''.format(__uci_response_exhaust_table__, config_id, bot_id)
     chunk_size = 100000
     for i in range(0, len(data), chunk_size):
         data_to_insert = list(map(lambda x: x[:-1], data[i:i+chunk_size]))
@@ -98,6 +98,8 @@ def parse_csv_data(arr):
 
 def create_or_update_uci_response_exhaust_table(cur, conn):
     column_datatype_map = {
+        'config_id': 'int',
+        'bot_id': 'text',
         'message_id': 'text',
         'conversation_id': 'text',
         'conversation_name': 'text',
@@ -196,7 +198,7 @@ def process_csv(**context):
             parsed_data = parse_csv_data(data[1:])
 
             insert_data_in_uci_response_exhaust_table(
-                cur_state, conn_state, parsed_data)
+                cur_state, conn_state, parsed_data, csv_record['config_id'], csv_record['bot_id'])
 
             update_is_csv_processed(cur, csv_record['tag'])
 

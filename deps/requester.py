@@ -44,7 +44,7 @@ def get_connection(uri=__db_uri__):
     return cur, conn
 
 
-def insert_requests(bot_id, start_date, end_date, state_id, dataset):
+def insert_requests(config_id, bot_id, start_date, end_date, state_id, dataset):
     '''
     Insert requests objects in the table 'job-request' ready to be picked up by 'process_job_requests()'
     '''
@@ -53,8 +53,8 @@ def insert_requests(bot_id, start_date, end_date, state_id, dataset):
     except psycopg2.InterfaceError:
         cur, conn = get_connection()
     query = f"""
-            insert into "{__request_table__}" ("bot_id", "tag", "start_date", "end_date", "state_id", "dataset") 
-            values ('{bot_id}','{str(uuid.uuid4())}','{start_date}','{end_date}','{state_id}','{dataset}')
+            insert into "{__request_table__}" ("config_id", "bot_id", "tag", "start_date", "end_date", "state_id", "dataset") 
+            values ('{config_id}','{bot_id}','{str(uuid.uuid4())}','{start_date}','{end_date}','{state_id}','{dataset}')
         """
     cur.execute(query)
     conn.commit()
@@ -71,7 +71,7 @@ def get_cron_config():
         cur, conn = get_connection()
     except psycopg2.InterfaceError:
         cur, conn = get_connection()
-    query = f'SELECT * FROM "{__config_table__}"'
+    query = f'SELECT * FROM "{__config_table__}" where "deleted_at" is null'
     cur.execute(query)
     config_objs = cur.fetchall()
     conn.commit()
@@ -129,7 +129,7 @@ def create_job_requests(**context):
         cur.execute(query)
         result = cur.fetchall()
         if not result:
-            insert_requests(config['bot_id'], str(start_date), str(end_date),
+            insert_requests(config['id'], config['bot_id'], str(start_date), str(end_date),
                             config['state_id'], config['dataset'])
         else:
             logging.info(
