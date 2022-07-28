@@ -114,17 +114,25 @@ def create_job_requests(**context):
         if not croniter.is_valid(config['frequency']):
             raise Exception(
                 f"Frequency crontab format in {__config_table__} table on {dt_string} is invalid")
-        freq_to_datetime = croniter(config['frequency'], datetime.now())
+        freq_to_datetime = croniter(config['frequency'], now)
         end_date = freq_to_datetime.get_next(
             ret_type=datetime).date() - timedelta(days=1)
-        start_date = datetime.now().date() - timedelta(days=1)
+        start_date = now.date() - timedelta(days=1)
         difference = (end_date - start_date).days
         query = f"""
-            SELECT * FROM "{__request_table__}"
+            (SELECT * FROM "{__request_table__}"
+            where "status" = 'SUBMITTED'
+            and "state_id" = '{config['state_id']}' 
+            and "bot_id" = '{config['bot_id']}' 
+            and "start_date" = '{str(start_date)}'
+            and "end_date" = '{str(end_date)}'
+            and "config_id" = '{config['id']}')
+            UNION ALL
+            (SELECT * FROM "{__request_table__}"
             where "request_id" is null
             and "state_id" = '{config['state_id']}' 
             and "bot_id" = '{config['bot_id']}' 
-            and ABS("end_date" - "start_date") = '{difference}'
+            and ABS("end_date" - "start_date") = '{difference}')
         """
         cur.execute(query)
         result = cur.fetchall()
@@ -142,7 +150,7 @@ def call_data_exhaust_submit_api(bot_id, dataset, tag, start_date, end_date):
     body = {
         'id': __submit_api_id__,
         'ver': __submit_api_ver__,
-        'ts': datetime.now().isoformat(),
+        'ts': now.isoformat(),
         'params': {
             'msgid': str(uuid.uuid4()),
         },
@@ -193,7 +201,7 @@ def process_job_requests(**context):
     query = f"""
         SELECT * FROM "{__request_table__}" 
         where "request_id" is null 
-        and "end_date" <= '{str(datetime.now().date())}'
+        and "end_date" <= '{str(now.date())}'
     """
     cur.execute(query)
     pending_requests = cur.fetchall()
