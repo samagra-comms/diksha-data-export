@@ -121,18 +121,20 @@ def create_job_requests(**context):
         difference = (end_date - start_date).days
         query = f"""
             (SELECT * FROM "{__request_table__}"
-            where "status" = 'SUBMITTED'
-            and "state_id" = '{config['state_id']}' 
-            and "bot_id" = '{config['bot_id']}' 
-            and "start_date" = '{str(start_date)}'
-            and "end_date" = '{str(end_date)}'
-            and "config_id" = '{config['id']}')
+                where "status" = 'SUBMITTED'
+                and "state_id" = '{config['state_id']}' 
+                and "bot_id" = '{config['bot_id']}' 
+                and "start_date" = '{str(start_date)}'
+                and "end_date" = '{str(end_date)}'
+                and "config_id" = '{config['id']}'
+                and "dataset" = '{config['dataset']}')
             UNION ALL
             (SELECT * FROM "{__request_table__}"
-            where "request_id" is null
-            and "state_id" = '{config['state_id']}' 
-            and "bot_id" = '{config['bot_id']}' 
-            and ABS("end_date" - "start_date") = '{difference}')
+                where "request_id" is null
+                and "state_id" = '{config['state_id']}' 
+                and "bot_id" = '{config['bot_id']}' 
+                and "dataset" = '{config['dataset']}'
+                and ABS("end_date" - "start_date") = '{difference}')
         """
         cur.execute(query)
         result = cur.fetchall()

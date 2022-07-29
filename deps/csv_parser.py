@@ -62,23 +62,28 @@ def update_is_csv_processed(cur, tag):
 
 
 def get_csv_file_data(link):
-    r = requests.get(link, stream=True)
-    path = f'{__path_store_csv__}/{uuid.uuid4()}.csv'
-    with open(path, "wb") as csv_file:
-        for chunk in r.iter_content(chunk_size=1024):
-            if chunk:
-                csv_file.write(chunk)
-    with open(path, mode='r') as f:
-        content = f.read()
-        content = re.sub(r'\n\n+', r'', content)
-        content = re.sub(r'\\"', r'"', content)
-        content = re.sub(r'{(.*?)}}((,))', r'\g<1>}&!&', content)
-        with open(f'{__path_store_csv__}/temp.csv', mode='w') as wf:
-            wf.write(content)
-        with open(f'{__path_store_csv__}/temp.csv', mode='r') as rf:
-            csv_file = csv.reader(rf, quoting=csv.QUOTE_NONE, quotechar='"')
-            data = [list(map(lambda x: x.strip('"'), l)) for l in csv_file]
-    return data
+    r = requests.get(link, stream=True, headers={
+        'Accept': 'text/csv'
+    })
+    if r.status_code == 200:
+        path = f'{__path_store_csv__}/{uuid.uuid4()}.csv'
+        with open(path, "wb") as csv_file:
+            for chunk in r.iter_content(chunk_size=1024):
+                if chunk:
+                    csv_file.write(chunk)
+        with open(path, mode='r') as f:
+            content = f.read()
+            content = re.sub(r'\n\n+', r'', content)
+            content = re.sub(r'\\"', r'"', content)
+            content = re.sub(r'{(.*?)}}((,))', r'\g<1>}&!&', content)
+            with open(f'{__path_store_csv__}/temp.csv', mode='w') as wf:
+                wf.write(content)
+            with open(f'{__path_store_csv__}/temp.csv', mode='r') as rf:
+                csv_file = csv.reader(
+                    rf, quoting=csv.QUOTE_NONE, quotechar='"')
+                data = [list(map(lambda x: x.strip('"'), l)) for l in csv_file]
+        return data
+    return None
 
 
 def parse_csv_data(arr):
@@ -94,6 +99,15 @@ def parse_csv_data(arr):
         lst = re.findall(r'\"(.*?)\":(\"|\{\"text\":\")(.*?)\"', arr[i][12])
         arr[i][12] = ':'.join([x[2] for x in lst])
     return arr
+
+
+def update_status(cur, status, tag):
+    '''
+    update column 'status' of 'job_request' table
+    '''
+    query = """UPDATE "{}" SET "status"='{}' where "tag"='{}'""".format(
+        __request_table__, status, tag)
+    cur.execute(query)
 
 
 def create_or_update_uci_response_exhaust_table(cur, conn):
@@ -173,7 +187,7 @@ def process_csv(**context):
         cur, conn = get_connection()
     except psycopg2.InterfaceError:
         cur, conn = get_connection()
-    query = 'SELECT * FROM "{}" where "csv" is not null and "is_csv_processed" = FALSE'.format(
+    query = """SELECT * FROM "{}" where "status" = 'SUCCESS' and "csv" is not null and "is_csv_processed" = FALSE""".format(
         __request_table__)
     cur.execute(query)
     unprocessed_csv_records = cur.fetchall()
@@ -195,6 +209,9 @@ def process_csv(**context):
         for csv_record in state_csv_records:
             csv_record = dict(csv_record)
             data = get_csv_file_data(csv_record['csv'])
+            if not data:
+                update_status(cur, 'FAILED', csv_record['tag'])
+                continue
             parsed_data = parse_csv_data(data[1:])
 
             insert_data_in_uci_response_exhaust_table(
