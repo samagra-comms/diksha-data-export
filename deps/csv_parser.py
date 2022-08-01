@@ -7,6 +7,7 @@ from datetime import datetime
 
 import psycopg2
 import requests
+import hashlib
 from dateutil.relativedelta import relativedelta
 from psycopg2.extras import RealDictCursor
 
@@ -22,10 +23,32 @@ now = datetime.now()
 #################################################
 __db_uri__ = Variable.get("main-db")
 __request_table__ = 'job_request'
-__uci_response_exhaust_table__ = 'uci_response_exhaust'
+# __uci_response_exhaust_table__ = 'uci_response_exhaust'
 __config_table__ = 'cron_config'
 
 __path_store_csv__ = '/tmp/'
+
+
+__column_datatype_map__ = {
+    'config_id': 'int',
+    'message_id': 'text',
+    'conversation_id': 'text',
+    'conversation_name': 'text',
+    'device_id': 'text',
+    'question_id': 'text',
+    'question_type': 'text',
+    'question_title': 'text',
+    'question_description': 'text',
+    'question_duration': 'text',
+    'question_score': 'text',
+    'question_max_score': 'text',
+    'question_options': 'text',
+    'question_response': 'text',
+    'x_path': 'text',
+    'eof': 'boolean',
+    'timestamp': 'TIMESTAMPTZ',
+    'hash_device_id_timestamp': 'text',
+}
 
 
 def get_connection(uri=__db_uri__):
@@ -37,21 +60,21 @@ def get_connection(uri=__db_uri__):
     return cur, conn
 
 
-def insert_data_in_uci_response_exhaust_table(cur, conn, data, config_id, bot_id):
+def insert_data_in_uci_response_exhaust_table(cur, conn, data, tablename):
     '''
     dump processed data in 'uci_response_exhaust' table
     '''
     query = '''
-        insert into "{}" 
-        ("config_id", "bot_id", "message_id", "conversation_id", "conversation_name", "device_id", "question_id", "question_type", "question_title", "question_description", "question_duration", "question_score", "question_max_score", "question_options", "question_response", "x_path", "eof", "timestamp")
-        values ('{}','{}',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-    '''.format(__uci_response_exhaust_table__, config_id, bot_id)
+        insert into "{}"
+        ({})
+    '''.format(tablename, ','.join([f'"{x}"' for x in __column_datatype_map__.keys()]))
+    query += "values (" + ','.join(['%s'] * len(__column_datatype_map__)) + ")"
     chunk_size = 100000
     for i in range(0, len(data), chunk_size):
-        data_to_insert = list(map(lambda x: x[:-1], data[i:i+chunk_size]))
+        data_to_insert = data[i:i+chunk_size]
         cur.executemany(query, data_to_insert)
     logging.info(
-        f"Total row affected in {__uci_response_exhaust_table__} table on {now}: {str(cur.rowcount)}")
+        f"Total row affected in {tablename} table on {now}: {str(cur.rowcount)}")
     conn.commit()
 
 
@@ -82,6 +105,7 @@ def get_csv_file_data(link):
                 csv_file = csv.reader(
                     rf, quoting=csv.QUOTE_NONE, quotechar='"')
                 data = [list(map(lambda x: x.strip('"'), l)) for l in csv_file]
+        data = list(map(lambda x: x[:-1], data))
         return data
     return None
 
@@ -101,45 +125,27 @@ def parse_csv_data(arr):
     return arr
 
 
-def update_status(cur, status, tag):
+def mark_for_redownload(cur, tag):
     '''
-    update column 'status' of 'job_request' table
+    update column 'status' and 'csv' of 'job_request' table so that
+    csv should get re-downloaded due to expired link
     '''
-    query = """UPDATE "{}" SET "status"='{}' where "tag"='{}'""".format(
-        __request_table__, status, tag)
+    query = """UPDATE "{}" SET "status"='', "csv"='' where "tag"='{}'""".format(
+        __request_table__, tag)
     cur.execute(query)
+    cur.commit()
 
 
-def create_or_update_uci_response_exhaust_table(cur, conn):
-    column_datatype_map = {
-        'config_id': 'int',
-        'bot_id': 'text',
-        'message_id': 'text',
-        'conversation_id': 'text',
-        'conversation_name': 'text',
-        'device_id': 'text',
-        'question_id': 'text',
-        'question_type': 'text',
-        'question_title': 'text',
-        'question_description': 'text',
-        'question_duration': 'text',
-        'question_score': 'text',
-        'question_max_score': 'text',
-        'question_options': 'text',
-        'question_response': 'text',
-        'x_path': 'text',
-        'eof': 'boolean',
-        'timestamp': 'TIMESTAMPTZ',
-    }
-
+def create_or_update_uci_response_exhaust_table(cur, conn, tablename):
+    column_datatype_map = __column_datatype_map__.copy()
     query = f'''
         SELECT EXISTS (
-        SELECT FROM 
-            information_schema.tables 
-        WHERE 
-            table_schema LIKE 'public' AND 
+        SELECT FROM
+            information_schema.tables
+        WHERE
+            table_schema LIKE 'public' AND
             table_type LIKE 'BASE TABLE' AND
-            table_name = '{__uci_response_exhaust_table__}'
+            table_name = '{tablename}'
         )
     '''
     cur.execute(query)
@@ -151,7 +157,7 @@ def create_or_update_uci_response_exhaust_table(cur, conn):
         FROM
             information_schema.columns
         WHERE
-            table_name = '{__uci_response_exhaust_table__}'
+            table_name = '{tablename}'
         '''
         cur.execute(query)
         records = cur.fetchall()
@@ -159,20 +165,48 @@ def create_or_update_uci_response_exhaust_table(cur, conn):
             column_datatype_map.pop(dict(r)['column_name'], None)
         if column_datatype_map:
             query = f'''
-                ALTER TABLE "{__uci_response_exhaust_table__}" 
+                ALTER TABLE "{tablename}"
             '''
             for k, v in column_datatype_map.items():
                 query += f'ADD COLUMN {k} {v}, '
             query = query[:-2]
             cur.execute(query)
+            query = f'''CREATE UNIQUE INDEX IF NOT EXISTS hash_idx ON "{tablename}" ("hash_device_id_timestamp")'''
+            cur.execute(query)
     else:
-        query = f'''CREATE TABLE "{__uci_response_exhaust_table__}" ('''
+        query = f'''CREATE TABLE "{tablename}" ('''
         for k, v in column_datatype_map.items():
             query += f'{k} {v}, '
         query = query[:-2]
         query += ')'
         cur.execute(query)
+        query = f'''CREATE UNIQUE INDEX IF NOT EXISTS hash_idx ON "{tablename}" ("hash_device_id_timestamp")'''
+        cur.execute(query)
     conn.commit()
+
+
+def filter_already_inserted_data(cur, data, tablename):
+    """
+    filter the data which is already inserted in db and only unique records should
+    get inserted
+    """
+    # hashing of "device_id" + "timestamp"
+    for el in data:
+        el.append(hashlib.sha256(
+            f'{el[3]}{el[15]}'.encode('utf-8')).hexdigest())
+    hashes = [f"'{el[-1]}'" for el in data]
+    # checking hash exist
+    query = f'''
+        select "hash_device_id_timestamp" from "{tablename}"
+        where "hash_device_id_timestamp" in ({','.join(hashes)})
+    '''
+    cur.execute(query)
+    records = cur.fetchall()
+    # filtering
+    already_exists_hashes = list(map(lambda x: dict(
+        x)['hash_device_id_timestamp'], records))
+    data = list(filter(lambda el: el[-1] not in already_exists_hashes, data))
+    return data
 
 
 def process_csv(**context):
@@ -205,17 +239,28 @@ def process_csv(**context):
             cur_state, conn_state = get_connection(
                 config[0]['db_credentials']['uri'])
 
-        create_or_update_uci_response_exhaust_table(cur_state, conn_state)
         for csv_record in state_csv_records:
             csv_record = dict(csv_record)
+            tablename = f"uci_response_exhaust:{csv_record['bot_id']}"
+
+            create_or_update_uci_response_exhaust_table(
+                cur_state, conn_state, tablename)
+
             data = get_csv_file_data(csv_record['csv'])
             if not data:
-                update_status(cur, 'FAILED', csv_record['tag'])
+                mark_for_redownload(cur, csv_record['tag'])
                 continue
             parsed_data = parse_csv_data(data[1:])
 
+            data_to_insert = filter_already_inserted_data(
+                cur_state, parsed_data, tablename)
+
+            # add config_id for tracing in future
+            for el in data_to_insert:
+                el.insert(0, csv_record['config_id'])
+
             insert_data_in_uci_response_exhaust_table(
-                cur_state, conn_state, parsed_data, csv_record['config_id'], csv_record['bot_id'])
+                cur_state, conn_state, data_to_insert, tablename)
 
             update_is_csv_processed(cur, csv_record['tag'])
 
