@@ -130,7 +130,7 @@ def mark_for_redownload(cur, tag):
     update column 'status' and 'csv' of 'job_request' table so that
     csv should get re-downloaded due to expired link
     '''
-    query = """UPDATE "{}" SET "status"='', "csv"='' where "tag"='{}'""".format(
+    query = """UPDATE "{}" SET "status"='SUBMITTED', "csv"='' where "tag"='{}'""".format(
         __request_table__, tag)
     cur.execute(query)
     cur.commit()
