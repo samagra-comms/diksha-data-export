@@ -1,4 +1,4 @@
-import csv
+import hashlib
 import itertools
 import logging
 import re
@@ -7,7 +7,6 @@ from datetime import datetime
 
 import psycopg2
 import requests
-import hashlib
 from dateutil.relativedelta import relativedelta
 from psycopg2.extras import RealDictCursor
 
@@ -27,6 +26,8 @@ __request_table__ = 'job_request'
 __config_table__ = 'cron_config'
 
 __path_store_csv__ = '/tmp/'
+
+__chunk_size__ = 100000
 
 
 __column_datatype_map__ = {
@@ -69,10 +70,7 @@ def insert_data_in_uci_response_exhaust_table(cur, conn, data, tablename):
         ({})
     '''.format(tablename, ','.join([f'"{x}"' for x in __column_datatype_map__.keys()]))
     query += "values (" + ','.join(['%s'] * len(__column_datatype_map__)) + ")"
-    chunk_size = 100000
-    for i in range(0, len(data), chunk_size):
-        data_to_insert = data[i:i+chunk_size]
-        cur.executemany(query, data_to_insert)
+    cur.executemany(query, data)
     logging.info(
         f"Total row affected in {tablename} table on {now}: {str(cur.rowcount)}")
     conn.commit()
@@ -84,7 +82,7 @@ def update_is_csv_processed(cur, tag):
     cur.execute(query)
 
 
-def get_csv_file_data(link):
+def get_csv_file(link):
     r = requests.get(link, stream=True, headers={
         'Accept': 'text/csv'
     })
@@ -94,38 +92,55 @@ def get_csv_file_data(link):
             for chunk in r.iter_content(chunk_size=1024):
                 if chunk:
                     csv_file.write(chunk)
-        with open(path, mode='r') as f:
-            content = f.read()
-            content = re.sub(r'\n\n+', r'', content)
-            content = re.sub(r'\\"', r'"', content)
-            content = re.sub(r'{(.*?)}}((,))', r'\g<1>}&!&', content)
-            with open(f'{__path_store_csv__}/temp.csv', mode='w') as wf:
-                wf.write(content)
-            with open(f'{__path_store_csv__}/temp.csv', mode='r') as rf:
-                csv_file = csv.reader(
-                    rf, quoting=csv.QUOTE_NONE, quotechar='"')
-                data = [list(map(lambda x: x.strip('"'), l)) for l in csv_file]
-        data = list(map(lambda x: x[:-1], data))
-        return data
+        return path
     return None
 
 
-def parse_csv_data(arr):
+def parse_line(line):
+    line = re.sub(r'\\"', r'"', line)  # remove excess quotes
+    line = re.sub(r'{(.*?)}}((,))', r'\g<1>}&!&', line)  # make csv valid
+    arr = line.split(',')
+    new_arr = []
+    for i in range(len(arr) - 1):
+        # handle commas in double quotes
+        if arr[i].startswith('"') and not arr[i].endswith('"'):
+            arr[i + 1] = arr[i] + arr[i + 1]
+        else:
+            new_arr.append(arr[i])
+    new_arr.append(arr[-1])
+    return parse_csv_arr(new_arr)
+
+
+def parse_csv_arr(arr):
     '''
     Apply some regex to process data in required form
     this function expect data without header row
     '''
-    for i in range(len(arr)):
-        if arr[i][5] == 'mcq':
-            lst = re.findall(r'\"text\":\"(.*?)\"', arr[i][11])
-            arr[i][11] = ':'.join(lst)
-        arr[i][14] = True if arr[i][14] == 'true' else False
-        lst = re.findall(r'\"(.*?)\":(\"|\{\"text\":\")(.*?)\"', arr[i][12])
-        arr[i][12] = ':'.join([x[2] for x in lst])
+    for i, el in enumerate(arr):
+        arr[i] = arr[i].strip('"')  # remove quotes
+    if arr[5] == 'mcq':
+        lst = re.findall(r'\"text\":\"(.*?)\"', arr[11])
+        arr[11] = ':'.join(lst)
+    arr[14] = True if arr[14] == 'true' else False
+    lst = re.findall(r'\"(.*?)\":(\"|\{\"text\":\")(.*?)\"', arr[12])
+    arr[12] = ':'.join([x[2] for x in lst])
+    del arr[-1]  # remove redundant last column '@timestamp' in csv
+    # add hash of "device_id" + "timestamp"
+    arr.append(hashlib.sha256(
+        f'{arr[3]}{arr[15]}'.encode('utf-8')).hexdigest())
     return arr
 
 
-def mark_for_redownload(cur, tag):
+def append_config_id_arr(arr, config_id):
+    '''
+    append config_id to each element of array
+    '''
+    for el in arr:
+        el.insert(0, config_id)
+    return arr
+
+
+def mark_for_redownload(cur, conn, tag):
     '''
     update column 'status' and 'csv' of 'job_request' table so that
     csv should get re-downloaded due to expired link
@@ -133,7 +148,7 @@ def mark_for_redownload(cur, tag):
     query = """UPDATE "{}" SET "status"='SUBMITTED', "csv"='' where "tag"='{}'""".format(
         __request_table__, tag)
     cur.execute(query)
-    cur.commit()
+    conn.commit()
 
 
 def create_or_update_uci_response_exhaust_table(cur, conn, tablename):
@@ -190,10 +205,6 @@ def filter_already_inserted_data(cur, data, tablename):
     filter the data which is already inserted in db and only unique records should
     get inserted
     """
-    # hashing of "device_id" + "timestamp"
-    for el in data:
-        el.append(hashlib.sha256(
-            f'{el[3]}{el[15]}'.encode('utf-8')).hexdigest())
     hashes = [f"'{el[-1]}'" for el in data]
     # checking hash exist
     query = f'''
@@ -246,21 +257,49 @@ def process_csv(**context):
             create_or_update_uci_response_exhaust_table(
                 cur_state, conn_state, tablename)
 
-            data = get_csv_file_data(csv_record['csv'])
-            if not data:
-                mark_for_redownload(cur, csv_record['tag'])
+            path = get_csv_file(csv_record['csv'])
+            if not path:
+                # csv link might expired, need to regenerate link
+                mark_for_redownload(cur, conn, csv_record['tag'])
                 continue
-            parsed_data = parse_csv_data(data[1:])
 
-            data_to_insert = filter_already_inserted_data(
-                cur_state, parsed_data, tablename)
+            data = []
+            with open(path, mode='r') as f:
+                actual_line = ''
+                for i, line in enumerate(f):
+                    if (i == 0):  # header row; ignore
+                        continue
 
-            # add config_id for tracing in future
-            for el in data_to_insert:
-                el.insert(0, csv_record['config_id'])
+                    if line.startswith('ASSESS'):
+                        if actual_line:
+                            arr = parse_line(actual_line)
+                            data.append(arr)
+                        actual_line = line
+                    else:
+                        actual_line += line
 
-            insert_data_in_uci_response_exhaust_table(
-                cur_state, conn_state, data_to_insert, tablename)
+                    if (len(data) == __chunk_size__):
+                        data_to_insert = filter_already_inserted_data(
+                            cur_state, data, tablename)
+                        data_to_insert = append_config_id_arr(
+                            data_to_insert, csv_record['config_id'])
+                        insert_data_in_uci_response_exhaust_table(
+                            cur_state, conn_state, data_to_insert, tablename)
+                        data.clear()
+
+                # last line
+                if actual_line:
+                    arr = parse_line(actual_line)
+                    data.append(arr)
+
+            # last chunk
+            if data:
+                data_to_insert = filter_already_inserted_data(
+                    cur_state, data, tablename)
+                data_to_insert = append_config_id_arr(
+                    data_to_insert, csv_record['config_id'])
+                insert_data_in_uci_response_exhaust_table(
+                    cur_state, conn_state, data_to_insert, tablename)
 
             update_is_csv_processed(cur, csv_record['tag'])
 
