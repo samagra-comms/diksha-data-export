@@ -1,4 +1,5 @@
 import logging
+import uuid
 from datetime import datetime
 
 import psycopg2
@@ -22,6 +23,8 @@ __config_table__ = 'cron_config'
 __csv_service_url__ = Variable.get("data-exhaust-service-url")
 __csv_service_token__ = Variable.get("data-exhaust-service-token")
 __data_exhaust_api_org_id__ = Variable.get("data-exhaust-api-org-id")
+
+__path_store_csv__ = '/tmp/diksha/'
 
 
 def get_connection(uri=__db_uri__):
@@ -49,12 +52,12 @@ def call_data_exhaust_read_api(request_id, tag):
     return r.status_code, r.json()
 
 
-def update_status_csv(cur, status, csv, tag):
+def update_status_csv(cur, status, csv, path, tag):
     '''
     update column 'status' and 'csv' of 'job_request' table
     '''
-    query = """UPDATE "{}" SET "status"='{}', "csv"='{}' where "tag"='{}'""".format(
-        __request_table__, status, csv, tag)
+    query = """UPDATE "{}" SET "status"='{}', "csv"='{}', "file_path"='{}' where "tag"='{}'""".format(
+        __request_table__, status, csv, path, tag)
     cur.execute(query)
 
 
@@ -65,6 +68,20 @@ def update_status(cur, status, tag):
     query = """UPDATE "{}" SET "status"='{}' where "tag"='{}'""".format(
         __request_table__, status, tag)
     cur.execute(query)
+
+
+def get_csv_file(link):
+    r = requests.get(link, stream=True, headers={
+        'Accept': 'text/csv'
+    })
+    if r.status_code == 200:
+        path = f'{__path_store_csv__}/{uuid.uuid4()}.csv'
+        with open(path, "wb") as csv_file:
+            for chunk in r.iter_content(chunk_size=1024):
+                if chunk:
+                    csv_file.write(chunk)
+        return path
+    return None
 
 
 def handle_read_requests(**context):
@@ -91,8 +108,11 @@ def handle_read_requests(**context):
 
         if status_code == 200:
             if response['result']['status'] == 'SUCCESS':
-                update_status_csv(
-                    cur, response['result']['status'], response['result']['downloadUrls'][0], req['tag'])
+                path = get_csv_file(response['result']['downloadUrls'][0])
+                if path:
+                    # csv file stored
+                    update_status_csv(
+                        cur, response['result']['status'], response['result']['downloadUrls'][0], path, req['tag'])
                 logging.info(
                     f"Response of tag {req['tag']} on {dt_string} for bot {req['bot_id']} and state {req['state_id']} saved success")
             elif response['result']['status'] == 'FAILED':

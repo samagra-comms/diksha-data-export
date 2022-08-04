@@ -2,13 +2,12 @@ import hashlib
 import itertools
 import logging
 import re
-import uuid
 from datetime import datetime
 
 import psycopg2
-import requests
 from dateutil.relativedelta import relativedelta
 from psycopg2.extras import RealDictCursor
+from pathlib import Path
 
 from airflow.models import Variable
 from config.exhaust_config import config as exhaust_config
@@ -24,8 +23,6 @@ __db_uri__ = Variable.get("main-db")
 __request_table__ = 'job_request'
 # __uci_response_exhaust_table__ = 'uci_response_exhaust'
 __config_table__ = 'cron_config'
-
-__path_store_csv__ = '/tmp/'
 
 __chunk_size__ = 100000
 
@@ -82,20 +79,6 @@ def update_is_csv_processed(cur, tag):
     cur.execute(query)
 
 
-def get_csv_file(link):
-    r = requests.get(link, stream=True, headers={
-        'Accept': 'text/csv'
-    })
-    if r.status_code == 200:
-        path = f'{__path_store_csv__}/{uuid.uuid4()}.csv'
-        with open(path, "wb") as csv_file:
-            for chunk in r.iter_content(chunk_size=1024):
-                if chunk:
-                    csv_file.write(chunk)
-        return path
-    return None
-
-
 def parse_line(line):
     line = re.sub(r'\\"', r'"', line)  # remove excess quotes
     line = re.sub(r'{(.*?)}}((,))', r'\g<1>}&!&', line)  # make csv valid
@@ -145,7 +128,7 @@ def mark_for_redownload(cur, conn, tag):
     update column 'status' and 'csv' of 'job_request' table so that
     csv should get re-downloaded due to expired link
     '''
-    query = """UPDATE "{}" SET "status"='SUBMITTED', "csv"='' where "tag"='{}'""".format(
+    query = """UPDATE "{}" SET "status"='SUBMITTED', "csv"='', "file_path"='', "is_csv_processed"=FALSE where "tag"='{}'""".format(
         __request_table__, tag)
     cur.execute(query)
     conn.commit()
@@ -232,7 +215,7 @@ def process_csv(**context):
         cur, conn = get_connection()
     except psycopg2.InterfaceError:
         cur, conn = get_connection()
-    query = """SELECT * FROM "{}" where "status" = 'SUCCESS' and "csv" is not null and "is_csv_processed" = FALSE""".format(
+    query = """SELECT * FROM "{}" where "status" = 'SUCCESS' and "file_path" is not null and "is_csv_processed" = FALSE""".format(
         __request_table__)
     cur.execute(query)
     unprocessed_csv_records = cur.fetchall()
@@ -257,14 +240,14 @@ def process_csv(**context):
             create_or_update_uci_response_exhaust_table(
                 cur_state, conn_state, tablename)
 
-            path = get_csv_file(csv_record['csv'])
-            if not path:
-                # csv link might expired, need to regenerate link
+            path = Path(csv_record['file_path'])
+            if not path.is_file():
+                # file not found need to re-download
                 mark_for_redownload(cur, conn, csv_record['tag'])
                 continue
 
             data = []
-            with open(path, mode='r') as f:
+            with open(csv_record['file_path'], mode='r') as f:
                 actual_line = ''
                 for i, line in enumerate(f):
                     if (i == 0):  # header row; ignore
