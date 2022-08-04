@@ -79,6 +79,7 @@ def get_csv_file(link):
     if r.status_code == 200:
         storage_path = Path(__path_store_csv__)
         if not storage_path.is_dir():
+            os.umask(0)
             os.mkdir(__path_store_csv__)
         path = f'{__path_store_csv__}/{uuid.uuid4()}.csv'
         with open(path, "wb") as csv_file:
