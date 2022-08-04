@@ -3,11 +3,11 @@ import itertools
 import logging
 import re
 from datetime import datetime
+from pathlib import Path
 
 import psycopg2
 from dateutil.relativedelta import relativedelta
 from psycopg2.extras import RealDictCursor
-from pathlib import Path
 
 from airflow.models import Variable
 from config.exhaust_config import config as exhaust_config
@@ -81,7 +81,6 @@ def update_is_csv_processed(cur, tag):
 
 def parse_line(line):
     line = re.sub(r'\\"', r'"', line)  # remove excess quotes
-    line = re.sub(r'{(.*?)}}((,))', r'\g<1>}&!&', line)  # make csv valid
     arr = line.split(',')
     new_arr = []
     for i in range(len(arr) - 1):
@@ -102,10 +101,10 @@ def parse_csv_arr(arr):
     for i, el in enumerate(arr):
         arr[i] = arr[i].strip('"')  # remove quotes
     if arr[5] == 'mcq':
-        lst = re.findall(r'\"text\":\"(.*?)\"', arr[11])
-        arr[11] = ':'.join(lst)
+        lst = re.findall(r'\"text\":\"((.|\n)*?)\"', arr[11])
+        arr[11] = ':'.join(x[0] for x in lst)
     arr[14] = True if arr[14] == 'true' else False
-    lst = re.findall(r'\"(.*?)\":(\"|\{\"text\":\")(.*?)\"', arr[12])
+    lst = re.findall(r'\"(.*?)\":(\"|\{\"text\":\")((.|\n)*?)\"', arr[12])
     arr[12] = ':'.join([x[2] for x in lst])
     del arr[-1]  # remove redundant last column '@timestamp' in csv
     # add hash of "device_id" + "timestamp"

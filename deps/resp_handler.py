@@ -1,6 +1,8 @@
 import logging
+import os
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 import psycopg2
 import requests
@@ -75,6 +77,9 @@ def get_csv_file(link):
         'Accept': 'text/csv'
     })
     if r.status_code == 200:
+        storage_path = Path(__path_store_csv__)
+        if not storage_path.is_dir():
+            os.mkdir(__path_store_csv__)
         path = f'{__path_store_csv__}/{uuid.uuid4()}.csv'
         with open(path, "wb") as csv_file:
             for chunk in r.iter_content(chunk_size=1024):
